@@ -57,17 +57,18 @@ const Stocks = () => {
           variant: "destructive",
         });
       }
-    },
-    onSettled: (data, error) => {
-      if (error) {
-        toast({
-          title: "Error loading stocks",
-          description: "Using cached data instead. " + (error as Error).message,
-          variant: "destructive",
-        });
-      }
     }
   });
+
+  useEffect(() => {
+    if (isError) {
+      toast({
+        title: "Error loading stocks",
+        description: "Using cached data instead. " + (error as Error)?.message,
+        variant: "destructive",
+      });
+    }
+  }, [isError, error]);
 
   const handleStockSelect = async (stock: StockData) => {
     try {
