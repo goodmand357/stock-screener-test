@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
 import StockDetail from '@/components/StockDetail';
 import stockService, { StockData } from '@/services/stockService';
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -24,21 +23,20 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const Stocks = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStock, setSelectedStock] = useState<StockData | null>(null);
   const [debouncedQuery, setDebouncedQuery] = useState('');
   
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Debounce search query to avoid excessive API calls
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-      setCurrentPage(1); // Reset to first page on new search
+      setCurrentPage(1);
     }, 300);
 
     return () => {
@@ -46,45 +44,74 @@ const Stocks = () => {
     };
   }, [searchQuery]);
 
-  // Fetch all stocks on initial load
-  const { data: stocks, isLoading, error } = useQuery({
+  const { data: stocks, isLoading, error, isError, refetch } = useQuery({
     queryKey: ['stocks'],
     queryFn: stockService.getStocks,
-    meta: {
-      onError: () => {
-        toast({
-          title: "Error",
-          description: "Could not fetch stocks. Using cached data.",
-          variant: "destructive",
-        });
-      }
-    },
+    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes to avoid API limits
+    retry: 2,
+    onError: (error) => {
+      toast({
+        title: "Error loading stocks",
+        description: "Using cached data instead. " + (error as Error).message,
+        variant: "destructive",
+      });
+    }
   });
 
-  // Handle stock selection
-  const handleStockSelect = (stock: StockData) => {
-    setSelectedStock(stock);
+  const handleStockSelect = async (stock: StockData) => {
+    try {
+      // Get latest data for the selected stock
+      const updatedStock = await stockService.getStock(stock.symbol);
+      setSelectedStock(updatedStock);
+    } catch (error) {
+      toast({
+        title: "Error loading stock details",
+        description: "Some data may not be current.",
+        variant: "destructive",
+      });
+      setSelectedStock(stock);
+    }
   };
 
-  // Handle back button click
   const handleBackClick = () => {
     setSelectedStock(null);
   };
 
-  // Filter stocks based on search query
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    
+    try {
+      // Manually trigger a search
+      const results = await stockService.searchStocks(searchQuery);
+      if (results.length === 0) {
+        toast({
+          title: "No results found",
+          description: `No stocks found matching "${searchQuery}"`,
+        });
+      } else if (results.length === 1) {
+        // If only one result, go directly to that stock
+        handleStockSelect(results[0]);
+      }
+    } catch (error) {
+      toast({
+        title: "Search failed",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const filteredStocks = stocks?.filter(stock =>
     stock.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
     stock.name.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
-  // Calculate pagination values
   const totalItems = filteredStocks.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = filteredStocks.slice(indexOfFirstItem, indexOfLastItem);
 
-  // Handle page navigation
   const goToNextPage = () => {
     setCurrentPage(prev => Math.min(prev + 1, totalPages));
   };
@@ -97,54 +124,44 @@ const Stocks = () => {
     setCurrentPage(page);
   };
 
-  // Calculate which page numbers to show
   const getPageNumbers = () => {
     const pageNumbers: number[] = [];
     const maxPagesToShow = 5;
     
     if (totalPages <= maxPagesToShow) {
-      // If total pages is less than maxPagesToShow, show all pages
       for (let i = 1; i <= totalPages; i++) {
         pageNumbers.push(i);
       }
     } else {
-      // Always include first page
       pageNumbers.push(1);
       
-      // Calculate middle pages
       let startPage = Math.max(2, currentPage - 1);
       let endPage = Math.min(totalPages - 1, currentPage + 1);
       
-      // Adjust if at the beginning or end
       if (currentPage <= 2) {
         endPage = 3;
       } else if (currentPage >= totalPages - 1) {
         startPage = totalPages - 2;
       }
       
-      // Add ellipsis indicator if needed
       if (startPage > 2) {
-        pageNumbers.push(-1); // -1 represents ellipsis
+        pageNumbers.push(-1);
       }
       
-      // Add middle pages
       for (let i = startPage; i <= endPage; i++) {
         pageNumbers.push(i);
       }
       
-      // Add ellipsis indicator if needed
       if (endPage < totalPages - 1) {
-        pageNumbers.push(-2); // -2 represents ellipsis
+        pageNumbers.push(-2);
       }
       
-      // Always include last page
       pageNumbers.push(totalPages);
     }
     
     return pageNumbers;
   };
 
-  // If a stock is selected, show the detailed view
   if (selectedStock) {
     return (
       <div className="animate-fadeIn">
@@ -153,13 +170,21 @@ const Stocks = () => {
     );
   }
 
-  // Main stocks list view
   return (
     <div className="animate-fadeIn p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Stocks</h1>
-        <p className="text-muted-foreground mt-1">Track and analyze stocks</p>
+        <p className="text-muted-foreground mt-1">Track and analyze stocks in real-time</p>
       </div>
+
+      <Alert className="mb-6">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Using Alpha Vantage API</AlertTitle>
+        <AlertDescription>
+          This application is using the Alpha Vantage API which has rate limits. 
+          If stock data appears outdated or incomplete, the application will fallback to cached data.
+        </AlertDescription>
+      </Alert>
 
       <div className="relative mb-6">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
@@ -168,6 +193,7 @@ const Stocks = () => {
           placeholder="Search stocks..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
         />
       </div>
 
@@ -180,8 +206,20 @@ const Stocks = () => {
           <Skeleton className="h-10 w-full" />
         </div>
       ) : error ? (
-        <div className="text-center py-10 text-red-500">
-          Error loading stocks. Using cached data.
+        <div className="text-center py-10">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error loading stocks</AlertTitle>
+            <AlertDescription>
+              Using cached data instead. Please try again later.
+              <button 
+                onClick={() => refetch()}
+                className="underline ml-2"
+              >
+                Retry
+              </button>
+            </AlertDescription>
+          </Alert>
         </div>
       ) : (
         <>
@@ -228,7 +266,6 @@ const Stocks = () => {
             </Table>
           </div>
           
-          {/* Pagination controls */}
           {filteredStocks.length > 0 && (
             <div className="flex items-center justify-between mt-4">
               <div className="text-sm text-muted-foreground">
