@@ -49,12 +49,23 @@ const Stocks = () => {
     queryFn: stockService.getStocks,
     refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes to avoid API limits
     retry: 2,
-    onError: (error) => {
-      toast({
-        title: "Error loading stocks",
-        description: "Using cached data instead. " + (error as Error).message,
-        variant: "destructive",
-      });
+    meta: {
+      errorHandler: (error: Error) => {
+        toast({
+          title: "Error loading stocks",
+          description: "Using cached data instead. " + error.message,
+          variant: "destructive",
+        });
+      }
+    },
+    onSettled: (data, error) => {
+      if (error) {
+        toast({
+          title: "Error loading stocks",
+          description: "Using cached data instead. " + (error as Error).message,
+          variant: "destructive",
+        });
+      }
     }
   });
 
